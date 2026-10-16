@@ -47,7 +47,7 @@ years_list = [2026, 2027, 2028]
 default_year_idx = years_list.index(init_year) if init_year in years_list else 0
 default_month_idx = init_month - 1
 
-# 기록된 근무시간을 반환하는 헬퍼 함수 (기록이 없으면 0.0 반환)
+# 기록이 없을 때 소정근로일이면 1일 근로시간, 아니면 0.0을 반환하는 헬퍼 함수
 def get_hours(recs, ds, c_date, emp_info):
     val = recs.get(ds, "")
     if val != "" and val is not None:
@@ -55,6 +55,10 @@ def get_hours(recs, ds, c_date, emp_info):
             return float(val)
         except:
             pass
+    work_days = emp_info.get("work_days", [])
+    daily_hrs = float(emp_info.get("daily_hours", 5.0))
+    if c_date.weekday() in work_days:
+        return daily_hrs
     return 0.0
 
 if mode == "직원 근태 입력":
@@ -179,7 +183,7 @@ if mode == "직원 근태 입력":
 
     st.markdown("---")
     st.markdown("### ⏱️ 이번 달 나의 누적 근무시간")
-    st.metric(label="총 근무시간", value=f"{t_hrs:.1f} 시간", help="저장 버튼을 누르면 반영됩니다")
+    st.metric(label="총 근무시간", value=f"{t_hrs:.1f} 시간")
 
 else:
     st.subheader("🔐 사장님 관리자 모드")
