@@ -280,10 +280,46 @@ else:
 
     net_pay = gross_pay - deduct_tot
 
-    r1, r2, r3 = st.columns(3)
-    r1.metric("총 근무 시간", f"{tot_h:.1f} 시간", f"기본급: {tot_base_pay:,.0f}원")
-    r2.metric("획득 주휴 시간", f"{tot_jh:.1f} 시간", f"주휴수당: {tot_juhyu_pay:,.0f}원")
-    r3.metric("최종 실지급액", f"{net_pay:,.0f} 원", f"공제액: -{deduct_tot:,.0f}원", delta_color="inverse")
+    # 주차별 일급 및 주휴수당 발생 여부 계산
+    all_dates = [start_date + timedelta(days=i) for i in range((end_date - start_date).days + 1)]
+    weeks = []
+    current_week = []
+    for d in all_dates:
+        current_week.append(d)
+        if d.weekday() == 6 or d == end_date:
+            weeks.append(current_week)
+            current_week = []
+
+    weekly_data = []
+    for w_idx, week in enumerate(weeks):
+        w_hrs = 0.0
+        for d in week:
+            ds = d.strftime("%Y-%m-%d")
+            w_hrs += get_hours(recs, ds, d, emp_info)
+        
+        w_pay = w_hrs * hw
+        
+        # 주휴수당 발생 여부 체크
+        w_juhyu_issued = False
+        if aj and wd_cnt > 0:
+            for d in week:
+                if d.weekday() == emp_info["holiday"]:
+                    ws = d - timedelta(days=6)
+                    perf = all(get_hours(recs, (ws + timedelta(days=i)).strftime("%Y-%m-%d"), ws + timedelta(days=i), emp_info) != 0 for i in range(7) if start_date <= ws + timedelta(days=i) <= end_date and (ws + timedelta(days=i)).weekday() in emp_info["work_days"])
+                    if perf:
+                        w_juhyu_issued = True
+                    break
+        
+        w_start_str = week[0].strftime("%m/%d")
+        w_end_str = week[-1].strftime("%m/%d")
+        weekly_data.append({
+            "주차": f"{w_idx + 1}주차 ({w_start_str}~{w_end_str})",
+            "주간 일급": f"{w_pay:,.0f}원",
+            "주휴수당": "발생" if w_juhyu_issued else "미발생"
+        })
+
+    st.markdown("### 📊 주차별 급여 현황")
+    st.table(pd.DataFrame(weekly_data))
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("### 🧾 급여명세서 (캡처용)")
