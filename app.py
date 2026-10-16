@@ -70,15 +70,14 @@ if mode == "직원 근태 입력":
         st.session_state["selected_emp"] = emp_list[0]
 
     st.write("👉 **본인의 이름을 터치해 주세요:**")
-    cols = st.columns(len(emp_list))
-    for idx, emp in enumerate(emp_list):
-        with cols[idx]:
-            btn_type = "primary" if st.session_state["selected_emp"] == emp else "secondary"
-            if st.button(f"👤 {emp}", use_container_width=True, type=btn_type):
-                st.session_state["selected_emp"] = emp
-                st.rerun()
-
-    selected_emp = st.session_state["selected_emp"]
+    selected_emp = st.pills(
+        "직원 선택",
+        options=emp_list,
+        default=st.session_state["selected_emp"],
+        selection_mode="single",
+        label_visibility="collapsed"
+    )
+    st.session_state["selected_emp"] = selected_emp
     emp_info = data[selected_emp]
     
     st.markdown(f"### ✨ **[{selected_emp}]** 님 환영합니다!")
