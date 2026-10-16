@@ -413,7 +413,7 @@ else:
     if act_type == "기존 직원 정보 수정":
         if emp_list:
             edit_target_emp = st.sidebar.selectbox("수정할 직원 선택", emp_list, key="sidebar_edit_emp")
-            
+
             if st.session_state.get("last_selected_emp") != edit_target_emp:
                 st.session_state["last_selected_emp"] = edit_target_emp
                 st.session_state["admin_emp_target"] = edit_target_emp
@@ -426,7 +426,6 @@ else:
                 saved_wd = curr_data.get("work_days", [])
                 for i in range(7):
                     st.session_state[f"wd_chk_{i}"] = i in saved_wd
-                st.rerun()
             else:
                 curr_data = data[edit_target_emp]
         else:
@@ -445,7 +444,6 @@ else:
             st.session_state["edit_tax_input"] = "적용 안 함"
             for i in range(7):
                 st.session_state[f"wd_chk_{i}"] = i in [1, 2, 3, 4]
-            st.rerun()
         curr_data = {}
 
     if act_type == "신규 직원 등록":
