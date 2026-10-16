@@ -416,6 +416,7 @@ else:
             
             if st.session_state.get("last_selected_emp") != edit_target_emp:
                 st.session_state["last_selected_emp"] = edit_target_emp
+                st.session_state["admin_emp_target"] = edit_target_emp
                 curr_data = data[edit_target_emp]
                 st.session_state["edit_w_input"] = int(curr_data.get("hourly_wage", DEFAULT_HOURLY_WAGE))
                 st.session_state["edit_h_input"] = float(curr_data.get("daily_hours", DEFAULT_DAILY_HOURS))
