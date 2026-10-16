@@ -5,19 +5,40 @@ import json
 import os
 
 DATA_FILE = "payroll_data.json"
+DEFAULT_HOURLY_WAGE = 10834
+DEFAULT_DAILY_HOURS = 5.0
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "1234")
+
+# Tax rate constants
+TAX_INCOME_RATE = 0.03
+TAX_LOCAL_RATE = 0.003
+TAX_PENSION_RATE = 0.045
+TAX_HEALTH_RATE = 0.03545
+TAX_CARE_RATE = 0.1295
+TAX_EMPLOYMENT_RATE = 0.009
 
 st.set_page_config(page_title="초당예반 근태 관리", page_icon="🌱", layout="centered")
 
-def load_data():
+def load_data() -> dict:
+    """Load payroll data from JSON file.
+
+    Returns:
+        dict: Loaded payroll data or empty dict if file doesn't exist or is invalid.
+    """
     if os.path.exists(DATA_FILE):
         try:
             with open(DATA_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except:
+        except (json.JSONDecodeError, IOError, OSError):
             return {}
     return {}
 
-def save_data(data):
+def save_data(data: dict) -> None:
+    """Save payroll data to JSON file.
+
+    Args:
+        data: Payroll data dictionary to save.
+    """
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
@@ -43,22 +64,68 @@ else:
     init_month = now.month
     init_year = now.year
 
-years_list = [2026, 2027, 2028]
+years_list = list(range(now.year, now.year + 3))
 default_year_idx = years_list.index(init_year) if init_year in years_list else 0
 default_month_idx = init_month - 1
 
 # 기록이 없을 때 소정근로일이면 1일 근로시간, 아니면 0.0을 반환하는 헬퍼 함수
-def get_hours(recs, ds, c_date, emp_info):
+def get_hours(recs: dict, ds: str, c_date: date, emp_info: dict) -> float:
+    """Get work hours for a specific date.
+
+    Args:
+        recs: Employee work records dictionary.
+        ds: Date string in YYYY-MM-DD format.
+        c_date: Date object for the current date.
+        emp_info: Employee information dictionary.
+
+    Returns:
+        float: Work hours for the date.
+    """
     val = recs.get(ds, "")
     if val != "" and val is not None:
         try:
             return float(val)
-        except:
+        except (ValueError, TypeError):
             pass
     work_days = emp_info.get("work_days", [])
     daily_hrs = float(emp_info.get("daily_hours", 5.0))
     if c_date.weekday() in work_days:
         return daily_hrs
+    return 0.0
+
+# 주휴수당 발생 여부 확인 함수
+def check_weekly_holiday_pay(recs: dict, c_date: date, emp_info: dict, start_date: date, end_date: date) -> float:
+    """Check if weekly holiday pay should be issued for a given date.
+
+    Args:
+        recs: Employee work records dictionary.
+        c_date: Date object for the current date.
+        emp_info: Employee information dictionary.
+        start_date: Start date of the pay period.
+        end_date: End date of the pay period.
+
+    Returns:
+        float: Holiday pay hours if conditions are met, otherwise 0.0.
+    """
+    aj = emp_info.get('apply_juhyu', True)
+    hol = emp_info.get('holiday', 0)
+    wd = emp_info.get('work_days', [])
+    dh = float(emp_info.get('daily_hours', DEFAULT_DAILY_HOURS))
+    wc = len(wd)
+
+    if not aj or c_date.weekday() != hol or wc == 0:
+        return 0.0
+
+    ws = c_date - timedelta(days=6)
+    perf = all(
+        get_hours(recs, (ws + timedelta(days=i)).strftime("%Y-%m-%d"), ws + timedelta(days=i), emp_info) != 0
+        for i in range(7)
+        if start_date <= ws + timedelta(days=i) <= end_date and (ws + timedelta(days=i)).weekday() in wd
+    )
+
+    if perf:
+        jpw = (dh * wc / 40) * 8
+        return jpw
     return 0.0
 
 if mode == "직원 근태 입력":
@@ -187,8 +254,8 @@ if mode == "직원 근태 입력":
 
 else:
     st.subheader("🔐 사장님 관리자 모드")
-    if st.text_input("관리자 비밀번호를 입력하세요", type="password", key="admin_pw") != "1234":
-        st.info("관리자 비밀번호를 입력하세요. (기본: 1234)")
+    if st.text_input("관리자 비밀번호를 입력하세요", type="password", key="admin_pw") != ADMIN_PASSWORD:
+        st.info("관리자 비밀번호를 입력하세요.")
         st.stop()
     st.success("관리자 권한 확인됨")
 
@@ -207,25 +274,16 @@ else:
     tot_pay, summary = 0, []
     for e_name, e_dat in data.items():
         recs = e_dat.get("records", {})
-        hw = float(e_dat.get('hourly_wage', 10834))
-        aj = e_dat.get('apply_juhyu', True)
-        dh = float(e_dat.get('daily_hours', 5.0))
-        wd = e_dat.get('work_days', [])
-        hol = e_dat.get('holiday', 0)
+        hw = float(e_dat.get('hourly_wage', DEFAULT_HOURLY_WAGE))
         tax_type = e_dat.get('tax_type', '적용 안 함')
-        
-        s_hrs, s_j_hrs, wc = 0.0, 0.0, len(wd)
-        jpw = (dh * wc / 40) * 8 if (aj and wc > 0) else 0.0
+
+        s_hrs, s_j_hrs = 0.0, 0.0
 
         c_date = start_date
         while c_date <= end_date:
             ds = c_date.strftime("%Y-%m-%d")
             s_hrs += get_hours(recs, ds, c_date, e_dat)
-            if aj and c_date.weekday() == hol:
-                ws = c_date - timedelta(days=6)
-                perf = all(get_hours(recs, (ws + timedelta(days=i)).strftime("%Y-%m-%d"), ws + timedelta(days=i), e_dat) != 0 for i in range(7) if start_date <= ws + timedelta(days=i) <= end_date and (ws + timedelta(days=i)).weekday() in wd)
-                if perf and wc > 0:
-                    s_j_hrs += jpw
+            s_j_hrs += check_weekly_holiday_pay(recs, c_date, e_dat, start_date, end_date)
             c_date += timedelta(days=1)
 
         epay = (s_hrs + s_j_hrs) * hw
@@ -240,25 +298,17 @@ else:
     st.subheader("🔍 직원별 상세 정산 및 급여명세서")
     selected_emp = st.selectbox("상세 조회할 직원 선택", emp_list, key="admin_emp_target")
     emp_info = data[selected_emp]
-    hw = float(emp_info.get('hourly_wage', 10834))
-    aj = emp_info.get('apply_juhyu', True)
+    hw = float(emp_info.get('hourly_wage', DEFAULT_HOURLY_WAGE))
     tax_type = emp_info.get('tax_type', '적용 안 함')
 
     recs = emp_info.get("records", {})
     tot_h, tot_jh = 0.0, 0.0
-    dh = float(emp_info.get('daily_hours', 5.0))
-    wd_cnt = len(emp_info.get('work_days', []))
-    jpw_emp = (dh * wd_cnt / 40) * 8 if (aj and wd_cnt > 0) else 0.0
 
     curr = start_date
     while curr <= end_date:
         ds = curr.strftime("%Y-%m-%d")
         tot_h += get_hours(recs, ds, curr, emp_info)
-        if aj and curr.weekday() == emp_info["holiday"]:
-            ws = curr - timedelta(days=6)
-            perf = all(get_hours(recs, (ws + timedelta(days=i)).strftime("%Y-%m-%d"), ws + timedelta(days=i), emp_info) != 0 for i in range(7) if start_date <= ws + timedelta(days=i) <= end_date and (ws + timedelta(days=i)).weekday() in emp_info["work_days"])
-            if perf and wd_cnt > 0:
-                tot_jh += jpw_emp
+        tot_jh += check_weekly_holiday_pay(recs, curr, emp_info, start_date, end_date)
         curr += timedelta(days=1)
 
     tot_base_pay = tot_h * hw
@@ -268,14 +318,14 @@ else:
     # 공제 내역 계산 (10원 단위 절사)
     deduct_tot, d_inc, d_loc, d_pen, d_hlth, d_care, d_emp = 0, 0, 0, 0, 0, 0, 0
     if tax_type == "3.3% (사업소득)":
-        d_inc = int(gross_pay * 0.03) // 10 * 10
-        d_loc = int(gross_pay * 0.003) // 10 * 10
+        d_inc = int(gross_pay * TAX_INCOME_RATE) // 10 * 10
+        d_loc = int(gross_pay * TAX_LOCAL_RATE) // 10 * 10
         deduct_tot = d_inc + d_loc
     elif tax_type == "4대보험 (근로소득)":
-        d_pen = int(gross_pay * 0.045) // 10 * 10
-        d_hlth = int(gross_pay * 0.03545) // 10 * 10
-        d_care = int(d_hlth * 0.1295) // 10 * 10
-        d_emp = int(gross_pay * 0.009) // 10 * 10
+        d_pen = int(gross_pay * TAX_PENSION_RATE) // 10 * 10
+        d_hlth = int(gross_pay * TAX_HEALTH_RATE) // 10 * 10
+        d_care = int(d_hlth * TAX_CARE_RATE) // 10 * 10
+        d_emp = int(gross_pay * TAX_EMPLOYMENT_RATE) // 10 * 10
         deduct_tot = d_pen + d_hlth + d_care + d_emp
 
     net_pay = gross_pay - deduct_tot
@@ -296,20 +346,19 @@ else:
         for d in week:
             ds = d.strftime("%Y-%m-%d")
             w_hrs += get_hours(recs, ds, d, emp_info)
-        
+
         w_pay = w_hrs * hw
-        
+
         # 주휴수당 발생 여부 체크
         w_juhyu_issued = False
+        aj = emp_info.get('apply_juhyu', True)
+        wd_cnt = len(emp_info.get('work_days', []))
         if aj and wd_cnt > 0:
             for d in week:
-                if d.weekday() == emp_info["holiday"]:
-                    ws = d - timedelta(days=6)
-                    perf = all(get_hours(recs, (ws + timedelta(days=i)).strftime("%Y-%m-%d"), ws + timedelta(days=i), emp_info) != 0 for i in range(7) if start_date <= ws + timedelta(days=i) <= end_date and (ws + timedelta(days=i)).weekday() in emp_info["work_days"])
-                    if perf:
-                        w_juhyu_issued = True
+                if check_weekly_holiday_pay(recs, d, emp_info, start_date, end_date) > 0:
+                    w_juhyu_issued = True
                     break
-        
+
         w_start_str = week[0].strftime("%m/%d")
         w_end_str = week[-1].strftime("%m/%d")
         weekly_data.append({
@@ -368,8 +417,8 @@ else:
             if st.session_state.get("last_selected_emp") != edit_target_emp:
                 st.session_state["last_selected_emp"] = edit_target_emp
                 curr_data = data[edit_target_emp]
-                st.session_state["edit_w_input"] = int(curr_data.get("hourly_wage", 10834))
-                st.session_state["edit_h_input"] = float(curr_data.get("daily_hours", 5.0))
+                st.session_state["edit_w_input"] = int(curr_data.get("hourly_wage", DEFAULT_HOURLY_WAGE))
+                st.session_state["edit_h_input"] = float(curr_data.get("daily_hours", DEFAULT_DAILY_HOURS))
                 st.session_state["edit_hol_input"] = int(curr_data.get("holiday", 0))
                 st.session_state["edit_aj_input"] = bool(curr_data.get("apply_juhyu", True))
                 st.session_state["edit_tax_input"] = curr_data.get("tax_type", "적용 안 함")
@@ -388,8 +437,8 @@ else:
         if st.session_state.get("last_act_type") != act_type:
             st.session_state["last_act_type"] = act_type
             st.session_state["last_selected_emp"] = None
-            st.session_state["edit_w_input"] = 10834
-            st.session_state["edit_h_input"] = 5.0
+            st.session_state["edit_w_input"] = DEFAULT_HOURLY_WAGE
+            st.session_state["edit_h_input"] = DEFAULT_DAILY_HOURS
             st.session_state["edit_hol_input"] = 0
             st.session_state["edit_aj_input"] = True
             st.session_state["edit_tax_input"] = "적용 안 함"
@@ -427,13 +476,17 @@ else:
         t_name = e_name_input.strip()
         if not t_name:
             st.sidebar.error("이름을 입력해주세요.")
+        elif not wd_in:
+            st.sidebar.error("소정근로일을 최소 1일 이상 선택해주세요.")
+        elif aj_in and hol_in not in wd_in:
+            st.sidebar.error("주휴수당 지급 대상인 경우, 주휴일은 소정근로일에 포함되어야 합니다.")
         else:
             existing_recs = data.get(t_name, {}).get("records", {})
             data[t_name] = {
-                "hourly_wage": hw_in, 
-                "daily_hours": dh_in, 
-                "work_days": wd_in, 
-                "holiday": hol_in, 
+                "hourly_wage": hw_in,
+                "daily_hours": dh_in,
+                "work_days": wd_in,
+                "holiday": hol_in,
                 "apply_juhyu": aj_in,
                 "tax_type": tax_in,
                 "records": existing_recs
